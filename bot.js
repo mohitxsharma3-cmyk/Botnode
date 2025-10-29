@@ -1,15 +1,16 @@
-// bot.js
 import TelegramBot from "node-telegram-bot-api";
 import express from "express";
 import sqlite3 from "sqlite3";
 import { open } from "sqlite";
 
+// --- Environment Variables ---
 const BOT_TOKEN = process.env.BOT_TOKEN || "6065570955:AAHIUsfGhc2MmQ3EiJtOw5ozzyQ7EzmWsmA";
 const PORT = process.env.PORT || 10000;
 
+// --- Initialize Telegram Bot ---
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
-// --- SQLite setup ---
+// --- Initialize SQLite Database ---
 let db;
 (async () => {
   db = await open({
@@ -22,36 +23,50 @@ let db;
       token TEXT UNIQUE
     )
   `);
+  console.log("✅ Database ready");
 })();
 
-// --- Telegram handlers ---
+// --- Telegram Command: /tokens ---
 bot.onText(/\/tokens/, async (msg) => {
   const chatId = msg.chat.id;
   const rows = await db.all("SELECT token FROM tokens");
-  if (rows.length) {
+  if (rows.length > 0) {
     const tokens = rows.map((r) => r.token).join("\n");
-    bot.sendMessage(chatId, tokens);
+    await bot.sendMessage(chatId, tokens);
   } else {
-    bot.sendMessage(chatId, "No tokens stored yet.");
+    await bot.sendMessage(chatId, "No tokens stored yet.");
   }
 });
 
+// --- Handle Normal Messages ---
 bot.on("message", async (msg) => {
-  if (!msg.text.startsWith("/")) {
-    const token = msg.text.trim();
-    try {
-      await db.run("INSERT INTO tokens (token) VALUES (?)", token);
-      bot.sendMessage(msg.chat.id, "✅ Token received and saved.");
-    } catch {
-      bot.sendMessage(msg.chat.id, "⚠️ Token already exists or error occurred.");
+  const chatId = msg.chat.id;
+  const text = msg.text?.trim();
+
+  // Ignore commands
+  if (!text || text.startsWith("/")) return;
+
+  try {
+    await db.run("INSERT INTO tokens (token) VALUES (?)", text);
+    await bot.sendMessage(chatId, "✅ Token received and saved.");
+  } catch (err) {
+    if (err.message.includes("UNIQUE constraint")) {
+      await bot.sendMessage(chatId, "⚠️ Token already exists.");
+    } else {
+      console.error("DB Error:", err);
+      await bot.sendMessage(chatId, "❌ Error saving token.");
     }
   }
 });
 
-// --- Express for uptime check ---
+// --- Express Web Server (for Render uptime) ---
 const app = express();
+
 app.get("/", (req, res) => {
-  res.json({ status: "Bot running!" });
+  res.json({ status: "Bot is alive and running!", time: new Date().toISOString() });
 });
 
-app.listen(PORT, () => console.log(`🌐 Server running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`🌐 Express server running on port ${PORT}`);
+  console.log("🤖 Telegram bot is polling...");
+});
